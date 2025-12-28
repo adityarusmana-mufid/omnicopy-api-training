@@ -1,13 +1,11 @@
 from datetime import datetime, timezone
 from email.policy import default
-from fastapi import Depends, FastAPI, Response
-from typing import Annotated, Any, Generic, TypeVar
-from fastapi import HTTPException
-from random import randint
-from fastapi import Response
+from fastapi import Depends, FastAPI, Request, Response
+from typing import Annotated, Any, Generic, Optional, TypeVar
+from fastapi import HTTPException, Response, Query
 from fastapi.concurrency import asynccontextmanager
 from pydantic import BaseModel
-from sqlmodel import Field, SQLModel, Session, create_engine, select
+from sqlmodel import Field, SQLModel, Session, create_engine, select, func
 
 class Campaign(SQLModel, table=True):
     campaign_id: int | None = Field(default=None, primary_key=True)
@@ -56,11 +54,33 @@ T = TypeVar("T")
 class Response(BaseModel, Generic[T]):
     data: T
 
+class PaginatedResponse(BaseModel, Generic[T]):
+    data: T
+    next: Optional[str]
+    prev: Optional[str]
 
-@app.get("/campaigns", response_model=Response[list[Campaign]])
-async def read_campaigns(session: SessionDep):
-    data = session.exec(select(Campaign)).all()
-    return {"data": data}
+
+@app.get("/campaigns", response_model=PaginatedResponse[list[Campaign]])
+async def read_campaigns(request: Request, session: SessionDep, page: int = Query(1, ge=1), page_size : int = Query(20, ge=1)):
+    # print("Page:", page)
+    limit = page_size
+    offset = (page - 1) * limit
+    data = session.exec(select(Campaign).order_by(Campaign.campaign_id).offset(offset).limit(limit)).all() #type: ignore
+
+    base_url = request.url._url.split("?")[0]
+
+    next_url = f"{base_url}?page={page + 1}&page_size={limit}"
+
+    if page > 1:
+        prev_url = f"{base_url}?page={page - 1}&page_size={limit}"
+    else:
+        prev_url = None
+
+    return {
+        "data": data,
+        "next": next_url,
+        "prev": prev_url
+    }
 
 @app.get("/campaigns/{id}", response_model=Response[Campaign])
 async def read_campaign(id: int, session: SessionDep):
