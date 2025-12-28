@@ -1,5 +1,7 @@
+import base64
 from datetime import datetime, timezone
 from email.policy import default
+import json
 from fastapi import Depends, FastAPI, Request, Response
 from typing import Annotated, Any, Generic, Optional, TypeVar
 from fastapi import HTTPException, Response, Query
@@ -57,26 +59,37 @@ class Response(BaseModel, Generic[T]):
 class PaginatedResponse(BaseModel, Generic[T]):
     data: T
     next: Optional[str]
-    prev: Optional[str]
 
+def encode_cursor(value):
+    raw = json.dumps({"id": value})
+    return base64.urlsafe_b64encode(raw.encode()).decode()
+
+def decode_cursor(cursor):
+    raw = base64.urlsafe_b64decode(cursor.encode()).decode()
+    payload = json.loads(raw)
+    return payload.get("id")
 
 @app.get("/campaigns", response_model=PaginatedResponse[list[Campaign]])
-async def read_campaigns(request: Request, session: SessionDep, offset: int = Query(0, ge=0), limit : int = Query(20, ge=1)):
-    data = session.exec(select(Campaign).order_by(Campaign.campaign_id).offset(offset).limit(limit)).all() #type: ignore
+async def read_campaigns(request: Request, session: SessionDep, cursor: Optional[str] = Query(None), limit : int = Query(20, ge=1)):
+    
+    cursor_id = 0
 
-    base_url = request.url._url.split("?")[0]
+    if cursor:
+        cursor_id = decode_cursor(cursor)
 
-    next_url = f"{base_url}?offset={offset + limit}&limit={limit}"
+    data = session.exec(select(Campaign).order_by(Campaign.campaign_id).where(Campaign.campaign_id > cursor_id).limit(limit+1)).all()  # type: ignore
 
-    if offset > 0:
-        prev_url = f"{base_url}?offset={max(0, offset-limit)}&limit={limit}"
-    else:
-        prev_url = None
+    base_url = str(request.url).split("?")[0]
+
+    next_url = None
+
+    if len(data) > limit:
+        next_cursor = encode_cursor(data[:limit][-1].campaign_id)
+        next_url = f"{base_url}?cursor={next_cursor}&limit={limit}"
 
     return {
-        "data": data,
+        "data": data[:limit],
         "next": next_url,
-        "prev": prev_url
     }
 
 @app.get("/campaigns/{id}", response_model=Response[Campaign])
