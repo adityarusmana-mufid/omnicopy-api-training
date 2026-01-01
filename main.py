@@ -88,7 +88,7 @@ async def read_campaigns(request: Request, session: SessionDep, cursor: Optional
         next_url = f"{base_url}?cursor={next_cursor}&limit={limit}"
 
     return {
-        "data": data[:limit],
+        "data": data[:limit]
         "next": next_url,
     }
 
